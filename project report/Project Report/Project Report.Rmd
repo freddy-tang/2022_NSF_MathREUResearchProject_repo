@@ -1,0 +1,1691 @@
+---
+title: "Project Report"
+author: "Freddy Tang"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    keep.md: yes
+---
+
+### Initial Steps
+
+```{r, label=setup, eval=FALSE, include=FALSE}
+# Global chunk option for the .Rnw file
+library(knitr)
+# global chunk options
+opts_chunk$set(eval=FALSE, include=FALSE)
+```
+
+```{r, label=Readcsv-Sample, eval=FALSE}
+df <- read.csv("C:\\DIRECTORY\\CombinedData.csv", header = TRUE)
+```
+
+```{r, label=Readcsv-Actual}
+df <- read.csv(
+  "https://raw.githubusercontent.com/freddy-tang/2022_NSF_MathREUResearchProject_repo/main/data/Combined%20Data/CombinedData.csv", header = TRUE
+)
+str(df)
+```
+
+```{r, label=VarInitial}
+# Time points (t) for our project
+df$Date <- as.Date(x = df$Date, format = "%m/%d/%Y")
+date <- df$Date
+
+# Excess Return (S&P 500 Returns - TB3MS) on t
+r_t <- df$ExcessReturn
+
+#ln EP on t
+x_t.ln <- df$lnEP
+
+# Long-Yield on t
+d_t.ly <- df$TB10YRS
+# Short-Yield on t
+d_t.sy <- df$TB3MS
+# Yield-Spread = d_t.ly - d_t.sy
+s_t <- df$YieldSpread
+
+# ln Long-Yield on t
+d_t.ly.ln <- df$lnTB10YRS
+#ln Short-Yield on t
+d_t.sy.ln <- df$lnTB3MS
+# Yield-Spread_ln (d_t.ly.ln - d_t.sy.ln)
+s_t.ln <- df$YieldSpread_ln
+
+# "_p" means t-1
+x_p.ln <- df$lnEP_Pre
+
+d_p.ly <- df$TB10YRS_Pre 
+d_p.sy <- df$TB3MS_Pre
+
+d_p.ly.ln <- df$lnTB10YRS_Pre
+d_p.sy.ln <- df$lnTB3MS_Pre
+s_p.ln <- df$YieldSpread_ln_Pre
+```
+
+```{r, label=Plot-ExcessReturn, fig.dim=c(6,2)}
+par(mfrow = c(1, 3))
+# Plot SP500Return
+plot(
+  x = df$Date, y = df$SP500Return, xlab = "Date", ylab = "S&P 500 Percentage Return", 
+  main = "S&P 500 Mthly % Return", col = "blue", type = "l"
+)
+  grid()
+
+# Plot RiskFreeRate (= TBS3MS)
+plot(
+  x = df$Date, y = df$RiskFreeRate, xlab = "Date", ylab = "Risk Free Rate", 
+  main = "Risk Free Rate(3-M TBill)", col = "blue", type = "l"
+)
+grid()
+
+# Plot ExcessReturn (SP500 - RiskFreeRate) = r_t
+plot(
+  x = df$Date, y = df$ExcessReturn, xlab = "Date", ylab = "Excess Return = r_t", 
+  main = "Excess Return", col = "blue", type = "l"
+)
+grid()
+```
+
+```{r, label=Plot-OtherVar, fig.dim=c(6,2)}
+par(mfrow = c(1, 3))
+# Plot ln EP = x_t.ln
+plot(
+  x = df$Date, y = df$lnEP, xlab = "Date", ylab = "ln EP", 
+  main = "S&P 500 Monthly ln EP", col = "blue", type = "l"
+)
+grid()
+
+# Plot overlay ln TB10YRS and ln TB3MS
+
+plot(
+  x = df$Date, y = df$lnTB10YRS, xlab = "Date", ylab = "ln TB10YRS / ln TB3MS", ylim = c(-8, 8),
+  main = "ln Long & ln Short Yield", col = "orange", type = "l"
+)
+
+points(x = df$Date, y = df$lnTB3MS, col = "blue", type = "l")
+
+legend("bottomleft", legend = c("ln TB10YRS", "ln TB3MS"), col = c("orange", "blue"), lty = 1,)
+
+grid()
+
+# Plot YieldSpread_ln (ln TB10YRS - ln TB3MS) = s_t.ln
+plot(
+  x = df$Date, y = df$YieldSpread, xlab = "Date", ylab = "ln TB10YRS - ln TB3MS", 
+  main = "Yield Spread", col = "blue", type = "l"
+)
+grid()
+```
+
+```{r, label=Create-et}
+# OLS model: d_t.ly.ln = a + b*d_t.sy.ln + e_t
+cI = lm(formula = df$lnTB10YRS ~ df$lnTB3MS , data = df)
+
+# e_t = d_t.ly.ln - a - b*d_t.sy.ln
+e_t <- residuals(cI)
+df.e_t <- data.frame(df$Date, e_t)
+colnames(df.e_t) = c("Date", "e_t")
+df.e_t <- df.e_t[order(df.e_t$Date, decreasing = FALSE), ]
+```
+
+```{r, label=OrderInt-Ly}
+## Check I(d) for d_t.ly.ln
+forecast::ndiffs(df$lnTB10YRS, test = "adf")
+```
+
+```{r, label=ADF-Ly}
+# Check I(0) d_t.ly.ln
+tseries::adf.test(df$lnTB10YRS, k = 1)
+aTSA::adf.test(df$lnTB10YRS)
+
+# Check I(1) d_t.ly.ln
+d_t.ly.ln.diff1 <- diff(x = df$lnTB10YRS, lag = 1, differences = 1)
+tseries::adf.test(d_t.ly.ln.diff1, k = 1)
+aTSA::adf.test(d_t.ly.ln.diff1)
+```
+
+```{r, label=OrderInt-Sy}
+## Check I(d) for d_t.sy.ln
+forecast::ndiffs(df$lnTB3MS, test = "adf")
+```
+
+```{r, label=ADF-Sy}
+# Check I(0) d_t.sy.ln
+tseries::adf.test(df$lnTB3MS, k = 1)
+aTSA::adf.test(df$lnTB3MS)
+
+# Check I(1) d_t.sy.ln
+d_t.sy.ln.diff1 <- diff(x = df$lnTB3MS, lag = 1, differences = 1)
+tseries::adf.test(d_t.sy.ln.diff1, k = 1)
+aTSA::adf.test(d_t.sy.ln.diff1)
+```
+
+```{r, label=OrderInt-et}
+# Check I(d) process between d_t.sy.ln and d_t.ly.ln (e_t)(co-integration)
+forecast::ndiffs(e_t, test = "adf")
+```
+
+```{r, label=ADF-et}
+# Check I(0) e_t
+tseries::adf.test(e_t)
+aTSA::adf.test(e_t)
+```
+
+```{r, label=Plot-StationaryVar, fig.dim=c(6,2)}
+par(mfrow = c(1, 3))
+# Plot d_t.ly.ln with diff = 1 and lag = 1
+plot(
+  x = diff(x = df$lnTB10YRS, lag = 1, differences = 1), xlab = "Date Index", ylab = "ln LY(t+1) - ln LY(t)", 
+  main = "ln LY I(1)", col = "blue", type = "l"
+)
+grid()
+
+# Plot d_t.sy.ln with diff = 1 and lag = 1
+plot(
+  x = diff(x = df$lnTB3MS, lag = 1, differences = 1), xlab = "Date Index", ylab = "ln SY(t+1) - ln SY(t)", 
+  main = "ln SY I(1)", col = "blue", type = "l"
+)
+grid()
+
+# Plot e_t against time
+
+plot(
+  x = df.e_t$Date, y = df.e_t$e_t, xlab = "Date", ylab = "e_t", 
+  main = "e_t Against Time", col = "blue", type = "l"
+)
+abline(h = 0, col = "red")
+grid()
+```
+
+### Generalized Additive Model
+
+```{r, label=GAM-CV}
+# Use a fixed intercept for the model 
+gam.itct.model <- mean(r_t)
+# Create a table of permutations of degrees of freedom
+pm <- gtools::permutations(n = 10, r = 3, v = c(1:10), repeats.allowed = TRUE)
+# splines package required for ns() for natural cubic splines matrices generation
+library(splines)
+
+# Create a sequence of Q
+q <- 4
+Q <- c(1:q)
+# Assign an int value to m ( = 0.1 * the sample size)
+m <- floor(0.1*nrow(df))
+
+# Cross-Validation
+# AMS(p)
+AMS.dist <- numeric()
+
+# Iterate through all p
+i <- 1
+while (i >= 1 && i <= nrow(pm)){
+  
+  # Data frame for all the variables (note: each col of ns matrix is a variable 
+  # in multiple linear regression)
+  df.cv.dgr <- data.frame(
+                 r_t, 
+                 ns(x_p.ln, df = pm[i, 1]),
+                 ns(s_p.ln, df = pm[i, 2]),
+                 ns(e_t, df = pm[i, 3])
+               )
+  # AMSq, cleared for each new p
+  AMSq.seq <- numeric()
+  
+  # Iterate through all q
+  q <- 1
+  while (q >= min(Q) && q <= max(Q)){
+    
+    # New training and fitting sequence for every q
+    trainSeq <- 1:(nrow(df) - q*m)
+    fitSeq <- (nrow(df) - q*m + 1):(nrow(df) - q*m + m)
+    
+    # Multiple linear regression (intercept is fixed at gam.itct.model)
+    trainedModel <- lm(
+                      I(r_t[trainSeq] - gam.itct.model)
+                      ~ 0
+                      + ns(x_p.ln[trainSeq], df = pm[i, 1]) 
+                      + ns(s_p.ln[trainSeq], df = pm[i, 2]) 
+                      + ns(e_t[trainSeq], df = pm[i, 3])
+                    )
+    # For each function, multiplies the basis matrix with dim (fitseq by dfj) by 
+    # the estimated coefficients from the trainModel dim (dfj by 1)
+    # This provides the forecast for r_t on the fitting sequence
+    k <- 1
+    l <- 2
+    m <- 1
+    while (k >= 1 && k <= 3){
+      
+      if (k == 1){
+        df.cv <- pm[i, 1]
+      }else if (k == 2){
+        df.cv <- pm[i, 2]
+      }else{
+        df.cv <- pm[i, 3]
+      }
+      
+      # Matrix multiplication
+      f.val <- data.matrix(df.cv.dgr[fitSeq, (l:(l + df.cv - 1))]) %*% 
+               trainedModel$coefficients[m:(m + df.cv - 1)]
+      
+      # fj - mean(fj)
+      f.val.adj <- f.val - mean(f.val) 
+      nam.f.val.adj <- paste0("f", k, ".adj")
+      assign(nam.f.val.adj, f.val.adj)
+      
+      m <- m + df.cv
+      l <- l + df.cv
+      k <- k + 1
+      
+    }
+    
+    # Add the intercept and all the forecasted fj to forcast r_t
+    r_t.fitting <- gam.itct.model + f1.adj + f2.adj + f3.adj
+    
+    # Read in a AMSq value for each q into AMSq set
+    AMSq <- (1/m)*(sum((r_t[fitSeq] - r_t.fitting)^2))
+    AMSq.seq <- c(AMSq.seq, AMSq)
+    
+    q <- q + 1
+    
+  }
+  
+  # Read in a AMS(p) value for each p into AMS(p) set
+  AMS <- (1/max(Q))*sum(AMSq.seq)
+  AMS.dist <- c(AMS.dist, AMS)
+  
+  i <- i + 1
+  
+}
+# Degrees of freedom for each fj that minimize the AMS
+row.df.opt <- match(min(AMS.dist), AMS.dist)
+row.df.opt <- pm[row.df.opt, ]
+
+df.opt.1 <- row.df.opt[1]
+df.opt.2 <- row.df.opt[2]
+df.opt.3 <- row.df.opt[3]
+```
+
+```{r, label=GAM-CV-Out}
+print(
+  paste(
+    "The optimizing degrees of freedom for the basis splines of f1 is"
+    , df.opt.1, ", of f2 is", df.opt.2, ", of f3 is", df.opt.3
+  )
+)
+```
+
+```{r, label=GAM-Estimate}
+# df.cv.mir 
+df.cv.mir <- data.frame(
+               r_t, 
+               ns(x_p.ln, df = df.opt.1),
+               ns(s_p.ln, df = df.opt.2),
+               ns(e_t, df = df.opt.3)
+             )
+# Read in the names of the columns in df.cv.mir into j
+j <-  character()
+i <- 2
+while (i >= 2 && i <= ncol(df.cv.mir)){
+  
+  j <- c(j, colnames(df.cv.mir[i]))
+  
+  i <-  i + 1
+  
+}
+
+# Multiple linear regression (intercept is fixed at gam.itct.model)
+gam.model <- lm(as.formula(paste("I(r_t - gam.itct.model) ~", "0 +", 
+                                 paste(j, collapse = "+"))), 
+                data = df.cv.mir
+             )
+
+
+# f1, f2, f3; f1.adj, f2.adj, f3.adj
+# For each function, multiplies the basis matrix with dim (n=724 by dfj) by
+# the estimated coefficients from gam.model dim (dfj by 1)
+# This yields f1, f2, f3, then fj - mean(fj) to get f1.adj, f2.adj. f3.adj
+i <- 1
+j <- 2
+k <- 1
+
+while (i >= 1 && i <= 3){
+  
+  if (i == 1){
+    df.opt <- df.opt.1
+  }else if (i == 2){
+    df.opt <- df.opt.2
+  }else{
+    df.opt <- df.opt.3
+  }
+  
+  # Matrix multiplication
+  f.val <- data.matrix(df.cv.mir[j:(j + df.opt - 1)]) %*% 
+           gam.model$coefficients[k:(k + df.opt - 1)]
+  nam.f.val <- paste0("f", i)
+  assign(nam.f.val, f.val)
+  
+  # fj - mean(fj)
+  f.val.adj <- f.val - mean(f.val) 
+  nam.f.val.adj <- paste0("f", i, ".adj")
+  assign(nam.f.val.adj, f.val.adj)
+  
+  k <- k + df.opt
+  j <- j + df.opt
+  i <- i + 1
+  
+}
+
+# The estimated r_t 
+r_t.fitting.gam <-  gam.itct.model + f1.adj + f2.adj + f3.adj
+
+# Residuals v_t
+v_t.gam <- r_t - r_t.fitting.gam
+```
+
+```{r, label=GAM-SeBands}
+# Obtain the covariance matrix for gam.model
+cm <- vcov(gam.model)
+
+# Obtain the variance of the predicted mean of f1, f2, f3
+i <- 1
+j <- 2
+k <- 1
+
+while (i >= 1 && i <= 3){
+  var.f.vec <- numeric()
+  
+  if (i == 1){
+    df.opt <- df.opt.1
+  }else if (i == 2){
+    df.opt <- df.opt.2
+  }else{
+    df.opt <- df.opt.3
+  }
+  # Iterate through 1:724; that is, through points of observation
+  l <- 1
+  while (l >= 1 && l <= nrow(df.cv.mir)){
+    # Matrix multiplication
+    dm <- data.matrix(df.cv.mir[l ,j:(j + df.opt - 1)]) %*% 
+          cm[(k:(k + df.opt - 1)), (k:(k + df.opt - 1)) ] %*% 
+          t(data.matrix(df.cv.mir[l, j:(j + df.opt - 1)]))
+    # Read each value of dm into a sequence for the variance of fj
+    var.f.vec <- c(var.f.vec, dm)
+    
+    l <-  l + 1
+    
+  }
+  
+  nam.f <- paste0("var.f", i)
+  assign(nam.f, var.f.vec)
+  
+  k <- k + df.opt
+  j <- j + df.opt
+  i <- i + 1
+  
+}
+
+# Obtain the standard error for f1, f2, f3
+se.f1 <- sqrt(var.f1)
+se.f2 <- sqrt(var.f2)
+se.f3 <- sqrt(var.f3)
+
+# Obtain the upper and lower point-wise twice standard error bands' values for 
+# f1.adj, f2.adj, f3.adj
+f1.adj.p2se <- f1.adj + 2*se.f1
+f1.adj.n2se <- f1.adj - 2*se.f1
+
+f2.adj.p2se <- f2.adj + 2*se.f2
+f2.adj.n2se <- f2.adj - 2*se.f2
+
+f3.adj.p2se <- f3.adj + 2*se.f3
+f3.adj.n2se <- f3.adj - 2*se.f3
+```
+
+```{r, label=GAM-SumStat}
+# R-squared = SSM/SST
+rsqr <- (sum((r_t.fitting.gam - mean(r_t))^2))/(sum((r_t - mean(r_t))^2))
+
+# F-statistics = MSM/MSE
+fstat <- (sum((r_t.fitting.gam - mean(r_t))^2)/(df.opt.1 + df.opt.2 + df.opt.3))/(sum((v_t.gam)^2)/(nrow(df)-(df.opt.1 + df.opt.2 + df.opt.3)))
+
+fstat.paste <- paste(
+  fstat, "on",(df.opt.1 + df.opt.2 + df.opt.3), "and", 
+  (nrow(df)-(df.opt.1 + df.opt.2 + df.opt.3)), "degrees of freedom,", " p-value: ",
+    pf(
+      fstat,
+      (df.opt.1 + df.opt.2 + df.opt.3),
+      (nrow(df)-(df.opt.1 + df.opt.2 + df.opt.3)),
+      lower.tail = FALSE
+    )
+  )
+```
+
+```{r, label=GAM-SumStat-Out}
+print(paste0("The R-squared for GAM model fitting is ", rsqr, ". ", "The F-statistics is ", fstat.paste))
+```
+
+```{r, label=Plot-GAM-fj, fig.dim=c(6,3)}
+# Combine each variable with its fj.adj into a data frame and plot it
+par(mfrow = c(1,3))
+df.f1.adj <- data.frame(x_p.ln, f1.adj)
+plot(x = x_p.ln, y = f1.adj, ylab = "f1",col = "blue", type = "p", ylim = c(-8, 5))
+title(main = "f1")
+points(x = x_p.ln, y = f1.adj.p2se, col = "grey", type = "p")
+points(x = x_p.ln, y = f1.adj.n2se, col = "grey", type = "p")
+
+
+df.f2.adj <- data.frame(s_p.ln, f2.adj)
+plot(x = s_p.ln, y = f2.adj, ylab = "f2", col = "blue", type = "p", ylim = c(-10, 21))
+title(main = "f2")
+points(x = s_p.ln, y = f2.adj.p2se, col = "grey", type = "p")
+points(x = s_p.ln, y = f2.adj.n2se, col = "grey", type = "p")
+
+df.f3.adj <- data.frame(e_t, f3.adj)
+plot(x = e_t, y = f3.adj, ylab = "f3", col = "blue", type = "p", ylim = c(-11, 10))
+title(main = "f3")
+points(x = e_t, y = f3.adj.p2se, col = "grey", type = "p")
+points(x = e_t, y = f3.adj.n2se, col = "grey", type = "p")
+```
+
+```{r, label=GAM-vt}
+fivenum.gam <- rbind(c("Min", "1Q", "Median", "3Q", "Max"), fivenum(v_t.gam))
+mean.gam <- mean(v_t.gam)
+se.gam <- paste(sqrt(sum((v_t.gam)^2)/(nrow(df)-(df.opt.1 + df.opt.2 + df.opt.3))),
+     "on", (nrow(df)-(df.opt.1 + df.opt.2 + df.opt.3)), "degrees of freedom."
+  )
+se.gam.1 <- sqrt(sum((v_t.gam)^2)/(nrow(df)-(df.opt.1 + df.opt.2 + df.opt.3)))
+```
+
+```{r, label=GAM-vt-Out}
+print(paste0("The residual v_t has a five number summary of: ")) 
+fivenum.gam
+             
+print(paste0("It has mean of ", mean.gam, ". ", "The standard error of the fitted model is ", se.gam, "."))
+```
+
+```{r, label=Plot-GAM-vt, fig.dim=c(6,3)}
+# Visualize residuals from the model
+par(mfrow = c(1, 3))
+library(rcompanion)
+
+qqnorm(v_t.gam)
+qqline(v_t.gam)
+
+plotNormalHistogram(x = v_t.gam, prob = FALSE, 
+                    xlab = "v_t.gam", ylab = "Frequency")
+abline(v = mean(v_t.gam), col = "orange")
+title(main = "Distribution of Residuals")
+
+plot(x = date, y = v_t.gam, xlab = "Date", ylab = "v_t.gam")
+title(main = "Residuals vs Date")
+abline(h = 0, col = "red")
+grid()
+```
+
+```{r, label=Plot-GAM-Overlay-rt, fig.dim=c(6,4)}
+# Plot overlay r_t and r_t.fitting.gam
+par(mfcol = c(1,1))
+
+plot(
+  x = df$Date, y = df$ExcessReturn, xlab = "Date", ylab = "r_t", ylim = c(-35, 20),
+  main = "Monthly r_t (ExcessReturn) and r_t (fitted values)", col = "orange", type = "l"
+)
+
+points(x = df$Date, y = r_t.fitting.gam, col = "blue", type = "l", lwd = 3 )
+
+legend("bottomleft", legend = c("r_t", "r_t (fitted values)"), col = c("orange", "blue"), lty = 1)
+
+grid()
+```
+
+```{r, label=GAM-Simulation}
+##### WARNINGS: Each simulation run takes about 20 seconds to complete #####
+# Set seed for reproducibility
+set.seed(777)
+# splines package required for ns() for natural cubic splines matrices generation
+library(splines)
+# Sample size = 800
+samSize.sim <- 800
+# Index for observations points
+date.index.sim <- c(1:samSize.sim)
+# Number of simulations
+num.sim <- 1000
+# Create a table of permutations of degrees of freedom for fj
+pm <- gtools::permutations(n = 10, r = 3, v = c(1:10), repeats.allowed = TRUE)
+# Create a sequence of Q for cross validation
+q <- 4
+Q <- c(1:q)
+# Assign an int value to d ( = 0.1 * the sample size) for cross validation
+d <- floor(0.1*samSize.sim)
+  
+# Distributions of simulated f1, f2 and f3
+f1.dist.sim <- data.frame(date.index.sim)
+f2.dist.sim <- data.frame(date.index.sim)
+f3.dist.sim <- data.frame(date.index.sim)
+
+# Distributions of the simulated intercept
+f.itct.dist.sim <- data.frame(c(1:num.sim))
+
+# Distributions of simulated variables
+v1.dist.sim <- data.frame(date.index.sim)
+v2.dist.sim <- data.frame(date.index.sim)
+v3.dist.sim <- data.frame(date.index.sim)
+
+# Domains for functions
+v1.bd.min <- 0
+v1.bd.max <- pi
+v2.bd.min <- 0
+v2.bd.max <- 2
+v3.bd.min <- pi/2
+v3.bd.max <- 3*pi/2
+
+# True functions
+f1.func <- function(x){3*cos(x)}
+f2.func <- function(x){3*x - 3}
+f3.func <- function(x){5*sin(x)}
+
+# Simulation loop
+l <- 1
+while (l >= 1 && l <= num.sim){
+  
+  ### True Model Assumption r_t = f_1(x_p.ln) + f_2(s_p.ln) + f_3(e_t) + v_t
+  ## Data Generating Process
+  # Uniform distributions 
+  x_t.ln.sim <- runif(n = samSize.sim + 1, min = v1.bd.min, max = v1.bd.max)
+  s_t.ln.sim <- runif(n = samSize.sim + 1, min = v2.bd.min, max = v2.bd.max)
+  e_t.sim <- runif(n = samSize.sim + 1, min = v3.bd.min, max = v3.bd.max)
+  # Standard norm distribution
+  v_t.gam.sim <- rnorm(n = samSize.sim + 1, mean = 0, sd = 1)
+  
+  # Get p = t-1 and corresponding t values for each variable and the residual
+  x_p.ln.sim <- x_t.ln.sim[1:samSize.sim]
+  s_p.ln.sim <- s_t.ln.sim[1:samSize.sim]
+  e_t.sim <- e_t.sim[2:(samSize.sim + 1)]
+  v_t.gam.sim <- v_t.gam.sim[2:(samSize.sim + 1)]
+  
+  # Read in simulated variables
+  v1.dist.sim[, (l + 1)] <- x_p.ln.sim
+  v2.dist.sim[, (l + 1)] <- s_p.ln.sim
+  v3.dist.sim[, (l + 1)] <- e_t.sim
+  
+  # Realization of the true model
+  r_t.sim <- 
+    12 + 
+    f1.func(x_p.ln.sim) + f2.func(s_p.ln.sim) + f3.func(e_t.sim)  + 
+    v_t.gam.sim
+  
+  # Read in simulated intercept
+  f.itct.dist.sim[l, 2] <- mean(r_t.sim)
+  
+  ## Cross validation for degrees for freedom for natural splines
+  # Cross-Validation
+  # AMS(p)
+  AMS.dist <- numeric()
+  # Iterate through all p
+  i <- 1
+  while (i >= 1 && i <= nrow(pm)){
+    
+  # Data frame for all the variables (note: each col of ns matrix is a variable)
+  # in multiple linear regression
+    df.cv.dgr <- data.frame(
+      r_t.sim, 
+      ns(x_p.ln.sim, df = pm[i, 1]),
+      ns(s_p.ln.sim, df = pm[i, 2]),
+      ns(e_t.sim, df = pm[i, 3])
+    )
+    
+    # AMSq, cleared for each new p
+    AMSq.seq <- numeric()
+    # Iterate through all q
+    q <- 1
+    while (q >= min(Q) && q <= max(Q)){
+      
+      # New training and fitting sequence for every q
+      trainSeq <- 1:(samSize.sim - q*d)
+      fitSeq <- (samSize.sim - q*d + 1):(samSize.sim - q*d + d)
+      
+      # Multiple linear regression (intercept is fixed at mean(r_t.sim))
+      trainedModel <- lm(
+        I(r_t.sim[trainSeq] - mean(r_t.sim))
+        ~ 0
+        + ns(x_p.ln.sim[trainSeq], df = pm[i, 1]) 
+        + ns(s_p.ln.sim[trainSeq], df = pm[i, 2]) 
+        + ns(e_t.sim[trainSeq], df = pm[i, 3])
+      )
+      
+      # For each function, multiplies the basis matrix with dim (fitseq by dfj)
+      # by the estimated coefficients from the trainedModel dim (dfj by 1)
+      # This provides the forecast for r_t on the fitting sequence
+      k <- 1
+      z <- 2
+      m <- 1
+      while (k >= 1 && k <= 3){
+        
+        if (k == 1){
+          df.cv <- pm[i, 1]
+        }else if (k == 2){
+          df.cv <- pm[i, 2]
+        }else{
+          df.cv <- pm[i, 3]
+        }
+        
+        # Matrix multiplication
+        f.val <- data.matrix(df.cv.dgr[fitSeq, (z:(z + df.cv - 1))]) %*% 
+                 trainedModel$coefficients[m:(m + df.cv - 1)]
+        # fj - mean(fj)
+        f.val.adj <- f.val - mean(f.val) 
+        nam.f.val.adj <- paste0("f", k, ".adj")
+        assign(nam.f.val.adj, f.val.adj)
+        
+        m <- m + df.cv
+        z <- z + df.cv
+        k <- k + 1
+        
+      }
+      
+      # Add the intercept and all the forecasted fj to forcast r_t
+      r_t.fitting <- mean(r_t.sim) + f1.adj + f2.adj + f3.adj
+      
+      # Read in a AMSq value for each q into AMSq set
+      AMSq <- (1/d)*(sum((r_t.sim[fitSeq] - r_t.fitting)^2))
+      AMSq.seq <- c(AMSq.seq, AMSq)
+      
+      q <- q + 1
+      
+    }
+    
+    # Read in a AMS(p) value for each p into AMS(p) set
+    AMS <- (1/max(Q))*sum(AMSq.seq)
+    AMS.dist <- c(AMS.dist, AMS)
+    
+    i <- i + 1
+    
+  }
+  
+  # Degrees of freedom for each fj that minimize the AMS
+  row.df.opt <- match(min(AMS.dist), AMS.dist)
+  row.df.opt <- pm[row.df.opt, ]
+  
+  df.opt.1 <- row.df.opt[1]
+  df.opt.2 <- row.df.opt[2]
+  df.opt.3 <- row.df.opt[3]
+
+  ### Model Fitting
+  # df.cv.sim.fit
+  df.cv.sim.fit <- data.frame(
+                     r_t.sim, 
+                     ns(x_p.ln.sim, df = df.opt.1),
+                     ns(s_p.ln.sim, df = df.opt.2),
+                     ns(e_t.sim, df = df.opt.3)
+                   )
+  
+  # Read in the names of the columns in df.cv.mir into j
+  j <-  character()
+  i <- 2
+  while (i >= 2 && i <= ncol(df.cv.sim.fit)){
+    
+    j <- c(j, colnames(df.cv.sim.fit[i]))
+    
+    i <- i + 1
+    
+  }
+  
+  # Multiple linear regression (intercept is fixed at mean(r_t.sim))
+  gam.model.sim <- lm(as.formula(paste("I(r_t.sim - mean(r_t.sim)) ~", "0 +",
+                                       paste(j, collapse = "+"))), 
+                     data = df.cv.sim.fit
+                   )
+  
+  # f1, f2, f3; f1.adj, f2.adj, f3.adj
+  # For each function, multiplies the basis matrix with dim (samSize.sim by dfj)
+  # by the estimated coefficients from gam.model.sim dim (dfj by 1)
+  # This yields f1, f2, f3, then fj - mean(fj) to get f1.adj, f2.adj. f3.adj  
+  i <- 1
+  j <- 2
+  k <- 1
+  while (i >= 1 && i <= 3){
+    
+    if (i == 1){
+      df.opt <- df.opt.1
+      vl.dist.sim <- f1.dist.sim
+    }else if (i == 2){
+      df.opt <- df.opt.2
+      vl.dist.sim <- f2.dist.sim
+    }else{
+      df.opt <- df.opt.3
+      vl.dist.sim <- f3.dist.sim
+    }
+    
+    # Matrix multiplication
+    f.val.sim.fit <- data.matrix(df.cv.sim.fit[j:(j + df.opt - 1)]) %*% 
+                     gam.model.sim$coefficients[k:(k + df.opt - 1)]
+    
+    # fj - mean(fj)
+    f.val.adj.sim.fit <- f.val.sim.fit - mean(f.val.sim.fit) 
+    # Read in fj
+    vl.dist.sim <- data.frame(vl.dist.sim, f.val.adj.sim.fit)
+    
+    if (i == 1){
+      f1.dist.sim <- vl.dist.sim
+    }else if (i == 2){
+      f2.dist.sim <- vl.dist.sim
+    }else{
+      f3.dist.sim <- vl.dist.sim
+    }
+    
+    k <- k + df.opt
+    j <- j + df.opt
+    i <- i + 1
+    
+  }
+  
+  l <- l + 1
+  
+  # Keep track of which loop is run
+  print(paste0("BGN: ", l))
+  
+}
+```
+
+```{r, label=Plot-GAM-Simulation-Intercept, fig.dim=c(6,2)}
+### Graph
+# Distribution of Estimated Intercept
+library(rcompanion)
+plotNormalHistogram(x = f.itct.dist.sim[, 2], prob = FALSE, xlab = "Intercept (simulated)")
+abline(v = 12, col = "orange")
+
+print(paste0("Simulated Intercept: "))
+print(rbind(c("Min", "1Q", "Median", "3Q", "Max"), fivenum(f.itct.dist.sim[, 2])))
+print(paste("Mean: ", mean(f.itct.dist.sim[, 2])))
+print(paste("Recall coefficient of the simulation model: 12"))
+```
+
+```{r, label=Plot-GAM-Simulation-fj, fig.dim=c(6,4)}
+par(mfrow = c(1, 3))
+## f1
+# Graph Estimated f1
+curve(
+  expr = f1.func(x), from = v1.bd.min, to = v1.bd.max, 
+  xlab = "x_p.ln", ylab = "f1",
+  col = "orange", type = "n", lwd =  5, ylim = c(-4, 4)
+)
+
+i <- 1
+while (i >= 1 && i <= num.sim){
+  
+  points(
+    x = v1.dist.sim[, (i + 1)], y = f1.dist.sim[, (i + 1)], 
+    col = "grey", type = "p"
+  )
+  
+  i <- i + 1
+  
+}
+
+curve(
+  expr = f1.func(x), from = v1.bd.min, to = v1.bd.max, add = TRUE,
+  xlab = "x_p.ln", ylab = "f1",
+  col = "orange", type = "l", lwd =  5, ylim = c(-4, 4)
+)
+
+title(main = "f1(x_p.ln) & f1(simulations)")
+legend("bottomleft", legend = c("f1(x_p.ln)", "f1 (simulations)"), col = c("orange", "grey"), lty = 1)
+abline(h = 0, col = "red")
+grid()
+
+## f2
+# Graph Estimated f2
+curve(
+  expr = f2.func(x), from = v2.bd.min, to = v2.bd.max, 
+  xlab = "s_p.ln", ylab = "f2",
+  col = "orange", type = "n", lwd = 5, ylim = c(-10, 5)
+)
+
+i <- 1
+while (i >= 1 && i <= num.sim){
+  
+  points(x = v2.dist.sim[, (i + 1)], y = f2.dist.sim[, (i + 1)], col = "grey", type = "p")
+  
+  i <- i + 1
+  
+}
+
+curve(
+  expr = f2.func(x), from = v2.bd.min, to = v2.bd.max, add = TRUE,
+  xlab = "s_p.ln", ylab = "f2",
+  col = "orange", type = "l", lwd = 5, ylim = c(-10, 5)
+)
+
+title(main = "f2(s_p.ln) & f2 (simulations)")
+legend("bottomleft", legend = c("f2(s_p.ln)", "f2 (simulations)"), col = c("orange", "grey"), lty = 1)
+abline(h = 0, col = "red")
+grid()
+
+## f3
+# Graph Estimated f3
+curve(
+  expr = f3.func(x), from = v3.bd.min, to = v3.bd.max, 
+  xlab = "e_t", ylab = "f3",
+  col = "orange", type = "n", lwd = 5, ylim = c(-6, 6)
+)
+
+i <- 1
+while (i >= 1 && i <= num.sim){
+  
+  points(x = v3.dist.sim[, (i + 1)] , y = f3.dist.sim[, (i + 1)] , col = "grey", type = "p")
+  
+  i <- i + 1
+  
+}
+
+curve(
+  expr = f3.func(x), from = v3.bd.min, to = v3.bd.max, add = TRUE,
+  xlab = "e_t", ylab = "f3",
+  col = "orange", type = "l", lwd = 5, ylim = c(-6, 6)
+)
+
+title(main = "f3(e_t) & f3 (simulations)")
+legend("bottomleft", legend = c("f3(e_t)", "f3 (simulations)"), col = c("orange", "grey"), lty = 1)
+abline(h = 0, col = "red")
+grid()
+```
+
+### Time-Varying Coefficient Model
+
+```{r, label=TVCM-CV}
+### Time-Varying Coefficients ###
+obs <- 724
+date.index.cv <- c(1:obs)
+
+# r_t = \beta_1(t)*x_p.ln + \beta_2(t)*s_p.ln + \beta_3(t)*e_t + V_t
+
+# Create a table of permutations of degrees of freedom
+pm <- gtools::permutations(n = 10, r = 3, v = c(1:10), repeats.allowed = TRUE)
+# splines package required for ns() for natural cubic splines matrices generation
+library(splines)
+
+# Create a sequence of Q
+q <- 4
+Q <- c(1:q)
+# Assign an int value to m ( = 0.1 * the sample size)
+m <- floor(0.1*nrow(df))
+
+# Cross-Validation
+# AMS(p)
+AMS.dist <- numeric()
+
+# Iterate through all p
+i <- 1
+while (i >= 1 && i <= nrow(pm)){
+  
+  # Data frame for basis matrices
+  df.cv.dgr <- data.frame(
+    r_t[date.index.cv], 
+    ns(date.index.cv, df = pm[i, 1]), 
+    ns(date.index.cv, df = pm[i, 2]), 
+    ns(date.index.cv, df = pm[i, 3]))
+  # AMSq, cleared for each new p
+  AMSq.seq <- numeric()
+  
+  # Iterate through all q
+  q <- 1
+  while (q >= 1 && q <= max(Q)){
+    
+    # New training and fitting sequence for every q
+    trainSeq <- 1:(nrow(df[date.index.cv, ]) - q*m)
+    fitSeq <- (nrow(df[date.index.cv,])-q*m+1):(nrow(df[date.index.cv,])-q*m+m)
+    
+    # Multiple linear regression
+    trainedModel <- lm(
+      
+      r_t[trainSeq]
+      
+      ~ diag(x_p.ln[trainSeq], length(trainSeq), length(trainSeq)) %*% 
+        ns(x = date.index.cv[trainSeq], df = pm[i, 1])
+      
+      + diag(s_p.ln[trainSeq], length(trainSeq), length(trainSeq)) %*% 
+        ns(x = date.index.cv[trainSeq], df = pm[i, 2])
+      
+      + diag(e_t[trainSeq], length(trainSeq), length(trainSeq)) %*% 
+        ns(x = date.index.cv[trainSeq], df = pm[i, 3])
+      
+    )
+    
+    # For each function, multiplies the diagonal matrix of the variable dim
+    # (fitseq by fitseq) by the basis matrix dim (fitseq by dfj) then
+    # multiplies by the estimated coefficients from the trainModel dim (dfj 
+    # by 1). This provides the forecast for r_t on the fitting sequence.
+    
+    k <- 1
+    l <- 2
+    while (k >= 1 && k <= 3){
+      
+      if (k == 1){
+        df.cv <- pm[i, 1]
+        vl <- x_p.ln
+      }else if (k == 2){
+        df.cv <- pm[i, 2]
+        vl <- s_p.ln
+      }else{
+        df.cv <- pm[i, 3]
+        vl <- e_t
+      }
+      
+      # Matrix multiplication
+      f.val <- diag(x = vl[fitSeq], length(fitSeq), length(fitSeq)) %*%
+               data.matrix(df.cv.dgr[fitSeq, (l:(l + df.cv - 1))]) %*%
+               trainedModel$coefficients[l:(l + df.cv - 1)]
+            
+               
+      nam.f.val <- paste0("f", k)
+      assign(nam.f.val, f.val)
+      
+      l <- l + df.cv
+      k <- k + 1
+      
+    }
+    
+    # Add the trained intercept and all the forecasted fj to forecast r_t
+    r_t.fitting.vc <- trainedModel$coefficients[1] + f1 + f2 + f3
+    
+    # Read in a AMSq value for each q into AMSq set
+    AMSq <- (1/m)*(sum((r_t[fitSeq] - r_t.fitting.vc)^2))
+    AMSq.seq <- c(AMSq.seq, AMSq)
+    
+    q <- q + 1
+  }
+  
+  # Read in a AMS(p) value for each p into AMS(p) set
+  AMS <- (1/max(Q))*sum(AMSq.seq)
+  AMS.dist <- c(AMS.dist, AMS)
+  
+  i <- i + 1
+  
+}
+# Degrees of freedom for each fj that minimize the AMS
+row.df.opt <- match(min(AMS.dist), AMS.dist)
+row.df.opt <- pm[row.df.opt, ]
+
+df.opt.vc.1 <- row.df.opt[1]
+df.opt.vc.2 <- row.df.opt[2]
+df.opt.vc.3 <- row.df.opt[3]
+```
+
+```{r, label=TVCM-CV-Out}
+print(
+  paste(
+    "The optimizing degrees of freedom for the basis splines of the first coefficeint function is"
+    , df.opt.vc.1, ", of the second is", df.opt.vc.2, ", of the third is", df.opt.vc.3
+  )
+)
+```
+
+```{r, label=TVCM-Estimate}
+# Model Fitting
+obs <- 724
+date.index.vc.mf <- c(1:obs)
+
+df.cv.mir.vc <- data.frame(
+  r_t[date.index.vc.mf], 
+  ns(x = date.index.vc.mf, df = df.opt.vc.1), 
+  ns(x = date.index.vc.mf, df = df.opt.vc.2), 
+  ns(x = date.index.vc.mf, df = df.opt.vc.3)
+  )
+
+vc.model <- lm(
+              r_t[date.index.vc.mf]
+              
+              ~ diag(x_p.ln[date.index.vc.mf], 
+                     length(x_p.ln[date.index.vc.mf]), 
+                     length(x_p.ln[date.index.vc.mf])) %*% 
+                ns(x = date.index.vc.mf, df = df.opt.vc.1)
+              
+              + diag(s_p.ln[date.index.vc.mf], 
+                     length(s_p.ln[date.index.vc.mf]), 
+                     length(s_p.ln[date.index.vc.mf])) %*% 
+                ns(x = date.index.vc.mf, df = df.opt.vc.2)
+              
+              + diag(e_t[date.index.vc.mf], 
+                     length(e_t[date.index.vc.mf]), 
+                     length(e_t[date.index.vc.mf])) %*% 
+                ns(x = date.index.vc.mf, df = df.opt.vc.3)
+            )
+
+# Create vc1, vc2, vc3 and f1, f2, f3 as matrices
+i <- 1
+j <- 2
+
+while (i >= 1 && i <= 3){
+  
+  if (i == 1){
+    df.opt <- df.opt.vc.1
+    vl <- x_p.ln[date.index.vc.mf]
+  }else if (i == 2){
+    df.opt <- df.opt.vc.2
+    vl <- s_p.ln[date.index.vc.mf]
+  }else{
+    df.opt <- df.opt.vc.3
+    vl <- e_t[date.index.vc.mf]
+  }
+  
+  # Obtain vcj
+  vc.val <- data.matrix(df.cv.mir.vc[j:(j + df.opt - 1)]) %*%
+            vc.model$coefficients[j:(j + df.opt - 1)]
+  nam.vc.val <- paste0("vc", i)
+  assign(nam.vc.val, vc.val)
+  
+  # Obtain fj
+  f.val <- diag(vl[date.index.vc.mf], 
+                length(vl[date.index.vc.mf]), 
+                length(vl[date.index.vc.mf])) %*% 
+           vc.val
+  
+  nam.f.val <- paste0("f", i)
+  assign(nam.f.val, f.val)
+  
+  j <- j + df.opt
+  i <- i + 1
+  
+}
+
+# The estimated r_t 
+r_t.fitting.vc <-  vc.model$coefficients[1]  + f1 + f2 + f3
+
+# Residuals v_t
+v_t.vc <- residuals(vc.model)
+```
+
+```{r, label=TVCM-SeBands}
+# Obtaining the covariance matrix for vc.model
+cm.vc <- vcov(vc.model)
+
+# Obtain the variance of the vc1, vc2, vc3
+i <- 1
+j <- 2
+
+while (i >= 1 && i <= 3){
+  var.vc.vec <- numeric()
+  
+  if (i == 1){
+    df.opt <- df.opt.vc.1
+  }else if (i == 2){
+    df.opt <- df.opt.vc.2
+  }else{
+    df.opt <- df.opt.vc.3
+  }
+  
+  l <- 1
+  while (l >= 1 && l <= nrow(df.cv.mir.vc)){
+    
+    dm <- data.matrix(df.cv.mir.vc[l, j:(j + df.opt - 1)]) %*% 
+      cm.vc[(j:(j + df.opt - 1)), (j:(j + df.opt - 1)) ] %*% 
+      t(data.matrix(df.cv.mir.vc[l, j:(j + df.opt - 1)]))
+    
+    var.vc.vec <- c(var.vc.vec, dm)
+    
+    l <- l + 1
+    
+  }
+  
+  nam.vc <- paste0("var.vc", i)
+  assign(nam.vc, var.vc.vec)
+  
+  j <- j + df.opt
+  i <- i + 1
+  
+}
+
+# Obtain the standard error for vc1, vc2, vc3
+se.vc1 <- sqrt(var.vc1)
+se.vc2 <- sqrt(var.vc2)
+se.vc3 <- sqrt(var.vc3)
+
+# Obtain the upper and lower point-wise twice standard error values for vc1, vc2, and vc3
+vc1.p2se <- vc1 + 2*se.vc1
+vc1.n2se <- vc1 - 2*se.vc1
+
+vc2.p2se <- vc2 + 2*se.vc2
+vc2.n2se <- vc2 - 2*se.vc2
+
+vc3.p2se <- vc3 + 2*se.vc3
+vc3.n2se <- vc3 - 2*se.vc3
+```
+
+```{r, label=TVCM-SumStat}
+# R-squared = SSM/SST
+
+rsqr <- (sum((r_t.fitting.vc - mean(r_t))^2))/(sum((r_t - mean(r_t))^2))
+
+# F-statistics = MSM/MSE
+fstat <- (sum((r_t.fitting.vc - mean(r_t))^2)/(df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3))/(sum((v_t.vc)^2)/(nrow(df)-(1 + df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3)))
+
+fstat.paste <- paste(
+  fstat, "on",(df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3), "and", 
+  (nrow(df)-(1 + df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3)), "degrees of freedom,", " p-value: ",
+    pf(
+      fstat,
+      (df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3),
+      (nrow(df)-(1 + df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3)),
+      lower.tail = FALSE
+    )
+  )
+
+```
+
+```{r, label=TVCM-SumStat-Out}
+print(paste0("The R-squared for TVCM model fitting is ", rsqr, ". ", "The F-statistics is ", fstat.paste))
+```
+
+```{r, label=Plot-TVCM-vcj, fig.dim=c(6,3)}
+# Plot vc1, vc2, & vc3
+par(mfrow = c(1,3))
+
+# vc1
+plot(x = date, y = vc1, ylim = c(-3, 2))
+title(main = "vc1")
+points(x = date, y = vc1.p2se, col = "grey", type = "p")
+points(x = date, y = vc1.n2se, col = "grey", type = "p")
+abline(h = 0, col = "red")
+grid()
+
+# vc2
+plot(x = date, y = vc2, ylim = c(-3, 5))
+title(main = "vc2")
+points(x = date, y = vc2.p2se, col = "grey", type = "p")
+points(x = date, y = vc2.n2se, col = "grey", type = "p")
+abline(h = 0, col = "red")
+grid()
+
+# vc3
+plot(x = date, y = vc3, ylim = c(-20,2))
+title(main = "vc3")
+points(x = date, y = vc3.p2se, col = "grey", type = "p")
+points(x = date, y = vc3.n2se, col = "grey", type = "p")
+abline(h = 0, col = "red")
+grid()
+```
+
+```{r, label=TVCM-vt}
+fivenum.vc <- rbind(c("Min", "1Q", "Median", "3Q", "Max"), fivenum(v_t.vc))
+mean.vc <- mean(v_t.vc)
+se.vc <- paste(sqrt(sum((v_t.vc)^2)/(nrow(df)-(1 + df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3))),
+     "on", (nrow(df)-(1 + df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3)), "degrees of freedom."
+  )
+se.vc.1 <- sqrt(sum((v_t.vc)^2)/(nrow(df)-(1 + df.opt.vc.1 + df.opt.vc.2 + df.opt.vc.3)))
+```
+
+```{r, label=TVCM-vt-Out}
+print(paste0("The residual v_t has a five number summary of: ")) 
+fivenum.vc
+             
+print(paste0("It has mean of ", mean.vc, ". ", "The standard error of the fitted model is ", se.vc, "."))
+```
+
+```{r, label=Plot-TVCM-vt, fig.dim=c(6,3)}
+# Visualize residuals from the model
+par(mfrow = c(1, 3))
+library(rcompanion)
+
+qqnorm(v_t.vc)
+qqline(v_t.vc)
+
+plotNormalHistogram(x = v_t.vc, prob = FALSE, 
+                    xlab = "v_t.vc", ylab = "Frequency")
+abline(v = mean(v_t.vc), col = "orange")
+title(main = "Distribution of Residuals")
+
+plot(x = date, y = v_t.vc, xlab = "Date", ylab = "v_t.vc")
+title(main = "Residuals vs Date")
+abline(h = 0, col = "red")
+grid()
+```
+
+```{r, label=Plot-TVCM-Overlay-rt, fig.dim=c(6,4)}
+# Plot overlay r_t and r_t.fitting.vc
+par(mfcol = c(1,1))
+
+plot(
+  x = df$Date, y = df$ExcessReturn, xlab = "Date", ylab = "r_t", ylim = c(-35, 20),
+  main = "Monthly r_t (ExcessReturn) and r_t (fitted values)", col = "orange", type = "l"
+)
+
+points(x = df$Date, y = r_t.fitting.vc, col = "red", type = "l", lwd = 3 )
+
+legend("bottomleft", legend = c("r_t", "r_t (fitted values)"), col = c("orange", "red"), lty = 1)
+
+grid()
+```
+
+```{r, label=Plot-TVCM-vcj-PolyFit, fig.dim=c(6,4)}
+# Polynomial Fitting Coefficient Functions
+obs <- 724
+date.index.cf <- c(1:obs)
+
+## vc1
+vc1.model <- lm(vc1 ~ poly(date.index.cf, 2, raw = TRUE))
+vc1.model.pred <- predict(vc1.model, newdata = data.frame(date.index.cf))
+# Graph Estimated vc1
+par(mfrow = c(1,3))
+
+plot(
+  x = date[date.index.cf], y = vc1, ylim = c(-3,2),
+  xlab = "Date", ylab = "vc1(t)"
+)
+
+points(x = date[date.index.cf], y = vc1.p2se, col = "grey", type = "p")
+points(x = date[date.index.cf], y = vc1.n2se, col = "grey", type = "p")
+points(x = date[date.index.cf], y = vc1.model.pred, col = "orange", type = "l", lwd = 3)
+
+title(main = "Estimated vc1 & vc1(t)")
+legend(
+  "bottomleft", legend = c("vc1 (values)", "vc1(t) (functions)", "vc1 twice-se bands"), 
+  col = c("black", "orange", "grey"), lty = 1
+)
+abline(h = 0, col = "red")
+grid()
+
+## vc2
+vc2.model <- lm(vc2 ~ poly(date.index.cf, 1, raw = TRUE))
+vc2.model.pred <- predict(object = vc2.model, newdata = data.frame(date.index.cf))
+# Graph Estimated vc2
+
+plot(
+  x = date[date.index.cf], y = vc2, ylim = c(-3, 5),
+  xlab = "Date", ylab = "vc2(t)"
+)
+
+points(x = date[date.index.cf], y = vc2.p2se, col = "grey", type = "p")
+points(x = date[date.index.cf], y = vc2.n2se, col = "grey", type = "p")
+points(x = date[date.index.cf], y = vc2.model.pred, col = "orange", type = "l", lwd = 3)
+
+title(main = "Estimated vc2 & vc2(t)")
+legend(
+  "bottomleft", legend = c("vc2 (values)", "vc2(t) (functions)", "vc2 twice-se bands"), 
+  col = c("black", "orange", "grey"), lty = 1
+)
+abline(h = 0, col = "red")
+grid()
+
+## vc3
+vc3.model <- lm(vc3 ~ poly(date.index.cf, 2, raw = TRUE))
+vc3.model.pred <- predict(object = vc3.model, newdata = data.frame(date.index.cf))
+# Graph Estimated vc3
+
+plot(
+  x = date[date.index.cf], y = vc3, ylim = c(-20,2),
+  xlab = "Date", ylab = "vc3(t)"
+)
+
+points(x = date[date.index.cf], y = vc3.p2se, col = "grey", type = "p")
+points(x = date[date.index.cf], y = vc3.n2se, col = "grey", type = "p")
+points(x = date[date.index.cf], y = vc3.model.pred, col = "orange", type = "l", lwd = 3)
+
+title(main = "Estimated vc3 & vc3(t)")
+legend(
+  "bottomleft", legend = c("vc3 (values)", "vc3(t) (functions)", "vc3 twice-se bands"), 
+  col = c("black", "orange", "grey"), lty = 1
+)
+abline(h = 0, col = "red")
+grid()
+```
+
+```{r, label=Plot-TVCM-vcj-PolyFit-Out}
+print(paste0("The coefficients for the poly fit on vc1:"))
+cbind(coefficients(vc1.model)[[1]], coefficients(vc1.model)[[2]], coefficients(vc1.model)[[3]])
+
+print(paste0("The coefficients for the poly fit on vc2:"))
+cbind(coefficients(vc2.model)[[1]], coefficients(vc2.model)[[2]])
+
+print(paste0("The coefficients for the poly fit on vc3:"))
+cbind(coefficients(vc3.model)[[1]], coefficients(vc3.model)[[2]], coefficients(vc3.model)[[3]])
+```
+
+```{r, label=TVCM-Simulation}
+##### WARNINGS: Each simulation run takes about 45 seconds to complete #####
+# Simulation - Varying Coefficient Model 
+# Set seed for reproducibility
+set.seed(777)
+# splines package required for ns() for natural cubic splines matrices generation
+library(splines)
+# Sample size = 724
+samSize.sim <- 724
+# Index for observations points
+date.index.sim <- c(1:samSize.sim)
+# Number of simulations
+num.sim <- 1000
+# Create a table of permutations of degrees of freedom for fj
+pm <- gtools::permutations(n = 10, r = 3, v = c(1:10), repeats.allowed = TRUE) 
+# Create a sequence of Q for cross validation
+q <- 4
+Q <- c(1:q)
+# Assign an int value to m ( = 0.1 * the sample size) for cross validation
+m <- floor(0.1*samSize.sim)
+
+# Distributions of simulated vc1, vc2, and vc3
+vc1.dist.sim <- data.frame(vc1.model.pred)
+vc2.dist.sim <- data.frame(vc2.model.pred)
+vc3.dist.sim <- data.frame(vc3.model.pred)
+
+# Distributions of simulated intercept
+itct.dist.sim <- c(coef(vc.model)[[1]])
+
+# The true intercept of the simulation model is defined to be:
+vc.model.itct.sim <- coef(vc.model)[[1]]
+  
+# Simulation loop
+z <- 1
+while (z >= 1 && z <= num.sim){
+  
+  ### True Model Assumption r_t=\Phi_1(t)*x_p.ln+\Phi_2(t)*s_p.ln+\Phi_3*e_t+v_t
+  ## Data Generating Process
+  
+  # Normal distributions
+  x_t.ln.sim <- rnorm(samSize.sim + 1, mean(x_p.ln), sd(x_p.ln))
+  s_t.ln.sim <- rnorm(samSize.sim + 1, mean(s_p.ln), sd(s_p.ln))
+  e_t.sim <- rnorm(samSize.sim + 1, mean(e_t), sd(e_t))
+  # Standard normal distributions
+  v_t.vc.sim <- rnorm(samSize.sim + 1, 0, 1)
+  
+  # Get p = t-1 and corresponding t values for each variable and the residual
+  x_p.ln.sim <- x_t.ln.sim[1:samSize.sim]
+  s_p.ln.sim <- s_t.ln.sim[1:samSize.sim]
+  e_t.sim <- e_t.sim[2:(samSize.sim + 1)]
+  v_t.vc.sim <- v_t.vc.sim[2:(samSize.sim + 1)]
+  
+  # Realization of the true model
+  r_t.sim <-  vc.model.itct.sim +
+              vc1.model.pred*x_p.ln.sim + 
+              vc2.model.pred*s_p.ln.sim + 
+              vc3.model.pred*e_t.sim + 
+              v_t.vc.sim
+  
+  # Cross-Validation
+  # AMS(p)
+  AMS.dist <- numeric()
+  
+  # Iterate through all p
+  i <- 1
+  while (i >= 1 && i <= nrow(pm)){
+    
+    # Data frame for basis matrices
+    df.cv.dgr <- data.frame(
+      r_t[date.index.sim], 
+      ns(date.index.sim, df = pm[i, 1]), 
+      ns(date.index.sim, df = pm[i, 2]), 
+      ns(date.index.sim, df = pm[i, 3])
+    )
+    # AMSq, cleared for each new p
+    AMSq.seq <- numeric()
+    
+    # Iterate through all q
+    q <- 1
+    while (q >= 1 && q <= max(Q)){
+      
+      # New training and fitting sequence for every q
+      trainSeq <- 1:(samSize.sim - q*m)
+      fitSeq <- (samSize.sim - q*m + 1):(samSize.sim - q*m + m)
+      
+      # Multiple linear regression
+      trainedModel <- lm(
+        
+        r_t[trainSeq]
+        
+        ~ diag(x_p.ln[trainSeq], length(trainSeq), length(trainSeq)) %*% 
+          ns(x = date.index.sim[trainSeq], df = pm[i, 1])
+        
+        + diag(s_p.ln[trainSeq], length(trainSeq), length(trainSeq)) %*% 
+          ns(x = date.index.sim[trainSeq], df = pm[i, 2])
+        
+        + diag(e_t[trainSeq], length(trainSeq), length(trainSeq)) %*% 
+          ns(x = date.index.sim[trainSeq], df = pm[i, 3])
+        
+      )
+      
+      # For each function, multiplies the diagonal matrix of the variable dim
+      # (fitseq by fitseq) by the basis matrix dim (fitseq by dfj) then
+      # multiplies it by the estimated coefficients from the trainModel dim (dfj 
+      # by 1). This provides the forecast for r_t on the fitting sequence.
+      
+      k <- 1
+      l <- 2
+      while (k >= 1 && k <= 3){
+        
+        if (k == 1){
+          df.cv <- pm[i, 1]
+          vl <- x_p.ln
+        }else if (k == 2){
+          df.cv <- pm[i, 2]
+          vl <- s_p.ln
+        }else{
+          df.cv <- pm[i, 3]
+          vl <- e_t
+        }
+        
+        # Matrix multiplication
+        f.val <- diag(x = vl[fitSeq], length(fitSeq), length(fitSeq)) %*%
+                 data.matrix(df.cv.dgr[fitSeq, (l:(l + df.cv - 1))]) %*%
+                 trainedModel$coefficients[l:(l + df.cv - 1)]
+              
+                 
+        nam.f.val <- paste0("f", k)
+        assign(nam.f.val, f.val)
+        
+        l <- l + df.cv
+        k <- k + 1
+        
+      }
+      
+      # Add the trained intercept and all the forecasted fj to forecast r_t
+      r_t.fitting.vc <- trainedModel$coefficients[1] + f1 + f2 + f3
+      
+      # Read in a AMSq value for each q into AMSq set
+      AMSq <- (1/m)*(sum((r_t[fitSeq] - r_t.fitting.vc)^2))
+      AMSq.seq <- c(AMSq.seq, AMSq)
+      
+      q <- q + 1
+    }
+    
+    # Read in a AMS(p) value for each p into AMS(p) set
+    AMS <- (1/max(Q))*sum(AMSq.seq)
+    AMS.dist <- c(AMS.dist, AMS)
+    
+    i <- i + 1
+    
+  }
+  # Degrees of freedom for each fj that minimize the AMS
+  row.df.opt <- match(min(AMS.dist), AMS.dist)
+  row.df.opt <- pm[row.df.opt, ]
+  
+  df.opt.vc.1 <- row.df.opt[1]
+  df.opt.vc.2 <- row.df.opt[2]
+  df.opt.vc.3 <- row.df.opt[3]
+
+  # Model Fitting
+  df.cv.mir.vc.sim <- data.frame(
+    r_t.sim[date.index.sim], 
+    ns(x = date.index.sim, df = df.opt.vc.1), 
+    ns(x = date.index.sim, df = df.opt.vc.2), 
+    ns(x = date.index.sim, df = df.opt.vc.3)
+  )
+  
+  vc.model.sim <- lm(
+    r_t.sim[date.index.sim]
+    
+    ~ diag(x_p.ln.sim[date.index.sim], length(x_p.ln.sim[date.index.sim]), 
+           length(x_p.ln.sim[date.index.sim])) %*% 
+      ns(x = date.index.sim, df = df.opt.vc.1)
+    
+    + diag(s_p.ln.sim[date.index.sim], length(s_p.ln.sim[date.index.sim]), 
+           length(s_p.ln.sim[date.index.sim])) %*% 
+      ns(x = date.index.sim, df = df.opt.vc.2)
+    
+    + diag(e_t.sim[date.index.sim], length(e_t.sim[date.index.sim]), 
+           length(e_t.sim[date.index.sim])) %*% 
+      ns(x = date.index.sim, df = df.opt.vc.3)
+  )
+  
+  # Read in simulated intercept
+  itct.dist.sim <- c(itct.dist.sim, coef(vc.model.sim)[[1]])
+  
+  # Create simulated vc1, vc2, vc3 as vectors
+  i <- 1
+  j <- 2
+  
+  while (i >= 1 && i <= 3){
+    
+    if (i == 1){
+      df.opt <- df.opt.vc.1
+      vl <- x_p.ln.sim[date.index.sim]
+      vl.dist.sim <- vc1.dist.sim
+    }else if (i == 2){
+      df.opt <- df.opt.vc.2
+      vl <- s_p.ln.sim[date.index.sim]
+      vl.dist.sim <- vc2.dist.sim
+    }else{
+      df.opt <- df.opt.vc.3
+      vl <- e_t.sim[date.index.sim]
+      vl.dist.sim <- vc3.dist.sim
+    }
+    
+    # Matrix multiplication
+    vc.val.sim <- data.matrix(df.cv.mir.vc.sim[j:(j + df.opt - 1)]) %*%
+                  vc.model.sim$coefficients[j:(j + df.opt - 1)]
+    
+    # Read in simulated vcj vectors
+    vl.dist.sim <- data.frame(vl.dist.sim, vc.val.sim)
+    
+    if (i == 1){
+      vc1.dist.sim <- vl.dist.sim
+    }else if (i == 2){
+      vc2.dist.sim <- vl.dist.sim
+    }else{
+      vc3.dist.sim <- vl.dist.sim
+    }
+    
+    j <- j + df.opt
+    i <- i + 1
+    
+  }
+
+  z <- z + 1
+  
+  # Keep track of which loop is run
+  print(paste0("BGN: ", z))
+}
+```
+
+```{r, label=Plot-TVCM-Simulation-Intercept, fig.dim=c(6,2)}
+library(rcompanion)
+## itct
+par(mfrow = c(1,1))
+# Graph Estimated intercept
+plotNormalHistogram(x = itct.dist.sim, prob = FALSE, xlab = "intercept")
+abline(v = mean(itct.dist.sim), col = "orange")
+title(main = "Distribution of Estimated Intercept (simulations)")
+
+print("Intercept: ")
+rbind(c("Min", "1Q", "Median", "3Q", "Max"), fivenum(itct.dist.sim))
+print(paste("Mean: ", mean(itct.dist.sim)))
+print(paste("Recall intercept of the simulation model: ", vc.model.itct.sim))
+```
+
+```{r, label=Plot-TVCM-Simulation-vcj, fig.dim=c(6,4)}
+par(mfrow = c(1, 3))
+## vc1
+# Graph Estimated vc1
+plot(
+  x = date.index.sim, y = vc1.model.pred, 
+  xlab = "Date Index", ylab = "vc1",
+  col = "orange", type = "n", lwd = 3, 
+  ylim = c(-3,2)
+)
+
+i <- 1
+while (i >= 1 && i <= num.sim){
+  
+  points(x = date.index.sim, y = vc1.dist.sim[, (i + 1)], col = "grey", type = "l", lwd = 0.5)
+  
+  i <- i + 1
+  
+}
+points(x = date.index.sim, y = vc1.model.pred, col = "orange", type = "l", lwd = 2)
+
+title(main = "vc1(t) & vc1 (simulations)")
+legend("bottomleft", legend = c("vc1(t)", "vc1 (simulations)"), col = c("orange", "grey"), lty = 1)
+abline(h = 0, col = "red")
+grid()
+
+## vc2
+# Graph Estimated vc2
+plot(
+  x = date.index.sim, y = vc2.model.pred,
+  xlab = "Date Index", ylab = "vc2",
+  col = "orange", type = "n", lwd = 3, 
+  ylim = c(-1, 3)
+)
+
+i <- 1
+while (i >= 1 && i <= num.sim){
+  
+  points(x = date.index.sim, y = vc2.dist.sim[, (i + 1)], col = "grey", type = "l", lwd = 0.5)
+  
+  i <- i + 1
+  
+}
+points(x = date.index.sim, y = vc2.model.pred, col = "orange", type = "l", lwd = 2)
+
+title(main = "vc2(t) & vc2 (simulations)")
+legend("bottomleft", legend = c("vc2(t)", "vc2 (simulations)"), col = c("orange", "grey"), lty = 1)
+abline(h = 0, col = "red")
+grid()
+
+## vc3
+# Graph Estimated vc3
+plot(
+  x = date.index.sim, y = vc3.model.pred, col = "orange", 
+  xlab = "Date Index", ylab = "vc3",
+  type = "n", lwd = 3, ylim = c(-12,5)
+)
+
+i <- 1
+while (i >= 1 && i <= num.sim){
+  
+  points(x = date.index.sim , y = vc3.dist.sim[, (i + 1)] , col = "grey", type = "l", lwd = 0.5)
+  
+  i <- i + 1
+  
+}
+points(x = date.index.sim, y = vc3.model.pred, col = "orange", type = "l", lwd = 2)
+
+title(main = "vc3(t) & vc3 (simulations)")
+legend("bottomleft", legend = c("vc3(t)", "vc3 (simulations)"), col = c("orange", "grey"), lty = 1)
+abline(h = 0, col = "red")
+grid()
+```
+
+### Summary of GAM and TVCM Predicted r_t
+
+```{r, label=Plot-Overlay-Sum-rt, fig.dim=c(6,4)}
+# Graph actual r_t, r_t.fitting.gam, & r_t.func.vc
+par(mfrow = c(1, 1))
+
+plot(
+  x = date, y = r_t, 
+  xlab = "Date", ylab = "r_t",
+  col = "orange", type = "l", 
+  xlim = c(date[1], date[724]), ylim = c(-35, 20)
+)
+
+points(x = date, y = r_t.fitting.gam, col = "blue", type = "l", lwd = 3 )
+
+points(x = date, y = r_t.func.vc, col = "red", type = "l", lwd = 2)
+
+title(main = "Summary: r_t")
+legend("bottomleft", legend = c("r_t", "r_t(GAM)", "r_t(vc(t))"), col = c("orange", "blue", "red"), lty = 1)
+grid()
+
+
+```
